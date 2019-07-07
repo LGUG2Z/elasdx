@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"crypto/tls"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -38,6 +40,7 @@ func App() *cli.App {
 		cli.StringFlag{Name: "url", EnvVar: "ELASDX_URL", Usage: "ElasticSearch URL to connect to", Value: elastic.DefaultURL},
 		cli.StringFlag{Name: "username", EnvVar: "ELASDX_USERNAME", Usage: "ElasticSearch basic auth username"},
 		cli.StringFlag{Name: "password", EnvVar: "ELASDX_PASSWORD", Usage: "ElasticSearch basic auth password"},
+		cli.BoolFlag{Name: "skip-verify", EnvVar: "ELASDX_SKIP_VERIFY", Usage: "Skip TLS verification"},
 	}
 
 	app.Commands = []cli.Command{
@@ -54,11 +57,25 @@ func getClient(c *cli.Context) (*elastic.Client, error) {
 	username := c.String("username")
 	password := c.String("password")
 
+	client := http.DefaultClient
+
+	if c.GlobalBool("skip-verify") {
+		fmt.Println("Skipping verification")
+		client = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			},
+		}
+	}
+
 	hasBasicAuth := len(username) > 0
 	if hasBasicAuth {
 		return elastic.NewClient(
 			elastic.SetScheme(schemeAndURL[0]),
 			elastic.SetURL(url),
+			elastic.SetHttpClient(client),
 			elastic.SetBasicAuth(username, password),
 			elastic.SetSniff(false),
 		)
@@ -67,6 +84,7 @@ func getClient(c *cli.Context) (*elastic.Client, error) {
 	return elastic.NewClient(
 		elastic.SetScheme(schemeAndURL[0]),
 		elastic.SetURL(url),
+		elastic.SetHttpClient(client),
 		elastic.SetSniff(false),
 	)
 }

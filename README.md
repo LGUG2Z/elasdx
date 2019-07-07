@@ -139,6 +139,9 @@ The ElasticSearch URL can be set using the `ELASDX_URL` environment variable or 
 This value defaults to `http://127.0.0.1:9200`. If using basic auth, the username and password can be provided using the
 `ELASDX_USERNAME`, `--username` or `ELASDX_PASSWORD`, `--password` environment variables and flags respectively.
 
+Optionally, `elasdx` can make a connection to an instance or a cluster at a `https://` url without providing a valid
+certificate by setting either `ELASDX_SKIP_VERIFY` or `--skip-verify`.
+
 ### Reindex
 The `reindex` command assumes either a file or a directory of files named to match the index template and the eventual
 alias desired.

@@ -20,9 +20,10 @@ builds:
 
 dockers:
   - image_templates:
-      - "lgug2z/elasdx:{{ .Tag }}"
       - "lgug2z/elasdx:{{ .Major }}"
       - "lgug2z/elasdx:{{ .Major }}.{{ .Minor }}"
+      - "lgug2z/elasdx:{{ .Major }}.{{ .Minor }}.{{ .Patch }}"
+      - "lgug2z/elasdx:{{ .ShortCommit }}"
       - "lgug2z/elasdx:latest"
 
 brews:
