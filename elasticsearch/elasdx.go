@@ -91,6 +91,11 @@ func UpdateTemplatesAndCreateNewIndices(client *elastic.Client, templatesDir str
 	aliasToNewIndex := map[string]string{}
 
 	for _, file := range files {
+		// If we mount a ConfigMap directory in Kubernetes, we want to ignore the ..data symlink folder
+		if strings.HasPrefix(file.Name(), ".") || file.IsDir() {
+			continue
+		}
+
 		filePath := filepath.Join(templatesDir, file.Name())
 		newIndex, err := UpdateTemplateAndCreateNewIndex(client, filePath, bulkIndexing)
 		if err != nil {

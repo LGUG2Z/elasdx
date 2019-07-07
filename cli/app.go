@@ -60,7 +60,6 @@ func getClient(c *cli.Context) (*elastic.Client, error) {
 	client := http.DefaultClient
 
 	if c.GlobalBool("skip-verify") {
-		fmt.Println("Skipping verification")
 		client = &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
