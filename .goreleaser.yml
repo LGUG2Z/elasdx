@@ -1,0 +1,52 @@
+# @format
+
+project_name: elasdx
+
+env:
+  - GO111MODULE=on
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    binary: elasdx
+    ldflags:
+      - -X github.com/LGUG2Z/elasdx/cli.Version={{ .Version }} -X github.com/LGUG2Z/elasdx/cli.Commit={{ .Commit }}
+    goarch:
+      - amd64
+
+dockers:
+  - image_templates:
+      - "lgug2z/elasdx:{{ .Tag }}"
+      - "lgug2z/elasdx:{{ .Major }}"
+      - "lgug2z/elasdx:{{ .Major }}.{{ .Minor }}"
+      - "lgug2z/elasdx:latest"
+
+brews:
+  - name: elasdx
+    github:
+      owner: LGUG2Z
+      name: homebrew-tap
+    folder: Formula
+    homepage: "https://github.com/LGUG2Z/elasdx"
+    description: "An ElasticSearch index template updating, reindexing and cleanup tool"
+    test: |
+      system "#{bin}/elasdx --version"
+    install: |
+      bin.install "elasdx"
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ .Tag }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
