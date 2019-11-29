@@ -133,7 +133,7 @@ func ReindexOne(client *elastic.Client, alias, newIndex string) error {
 			// Reindex from the existing index as the source to the new index as the destination
 			src := elastic.NewReindexSource().Index(index)
 			dst := elastic.NewReindexDestination().Index(newIndex)
-			refresh, err := client.Reindex().Source(src).Destination(dst).Refresh("true").Do(context.Background())
+			refresh, err := client.Reindex().Source(src).Destination(dst).Refresh("true").Conflicts("proceed").Do(context.Background())
 			if err != nil {
 				return errors.Wrapf(err, "failed reindexing from %s to %s", index, newIndex)
 			}
