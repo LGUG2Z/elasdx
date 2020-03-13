@@ -136,7 +136,7 @@ func Reindex() cli.Command {
 		Usage: "Reindex from a src index to a dest index optionally creating a new index from an index template",
 		Flags: []cli.Flag{
 			cli.StringFlag{Name: "dest-index", Usage: "Optionally specify destination index, otherwise one will be generated and created for you."},
-			cli.BoolFlag{Name: "bulk-indexing", Usage: "set refresh_interval to -1 and set number_of_replicas to 0 when reindexing and revert afterwards (Does nothing with --dest-index)."},
+			cli.BoolFlag{Name: "bulk-indexing", Usage: "set refresh_interval to -1 and set number_of_replicas to 0 when reindexing and revert afterwards."},
 			cli.BoolFlag{Name: "version-external", Usage: "set version_type to external. This will only index documents if they don't exist or the source doc is at a higher version"},
 			cli.BoolFlag{Name: "no-update-alias", Usage: "don't update the index alias. This setting will also not revert the refresh_interval and number_of_replicas if bulk-indexing is set"},
 			cli.StringFlag{Name: "reindex-host-allocation", Usage: "Optional target host for the reindex to happen on. eg. 'es-reindex-*'"},
