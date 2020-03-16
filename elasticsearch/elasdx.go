@@ -18,14 +18,16 @@ var IndexTemplatePrefix = "INDEX TEMPLATE  "
 var IndexPrefix = "INDEX           "
 var DocumentsPrefix = "DOCUMENTS       "
 var AliasPrefix = "ALIAS           "
+var SettingsPrefix = "SETTINGS        "
 var Added = color.GreenString("Added      ")
 var Created = color.GreenString("Created    ")
 var Removed = color.RedString("Removed    ")
 var Deleted = color.RedString("Deleted    ")
 var Updated = color.GreenString("Updated    ")
 var Reindexed = color.YellowString("Reindexed  ")
+var Info = color.YellowString("Info       ")
 
-func UpdateTemplateAndCreateNewIndex(client *elastic.Client, filePath string, bulkIndexing bool) (string, error) {
+func UpdateTemplateAndCreateNewIndex(client *elastic.Client, filePath, newIndexName string, bulkIndexing bool) (string, error) {
 	bytes, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed reading file %s", filePath)
@@ -45,41 +47,52 @@ func UpdateTemplateAndCreateNewIndex(client *elastic.Client, filePath string, bu
 	if !indexPutTemplate.Acknowledged {
 		fmt.Printf("PUT index/%s not acknowledged\n", index)
 	}
+	fmt.Printf("%s %s %s\n", IndexTemplatePrefix, Updated, index)
 
 	// Create a unique time-stamped index
 	dateSuffix := time.Now().Format("2006-01-02-15:04:05")
-	indexWithDate := fmt.Sprintf("%s-%s", index, dateSuffix)
-
-	create, err := client.CreateIndex(indexWithDate).Do(context.Background())
-	if err != nil {
-		return "", errors.Wrapf(err, "failed creating index %s", indexWithDate)
+	if newIndexName == "" {
+		newIndexName = fmt.Sprintf("%s-%s", index, dateSuffix)
 	}
 
-	bulkIndexingSettings := `{
-    "index" : {
-        "refresh_interval" : "-1"
-    }
-}
-`
+	exists, err := client.IndexExists(newIndexName).Do(context.Background())
+	if err != nil {
+		return "", errors.Wrapf(err, "failed checking for index %s", newIndexName)
+	}
+
+	if !exists {
+		create, err := client.CreateIndex(newIndexName).Do(context.Background())
+		if err != nil {
+			return "", errors.Wrapf(err, "failed creating index %s", newIndexName)
+		}
+		if !create.Acknowledged {
+			fmt.Println("index creation not acknowledged")
+		}
+		fmt.Printf("%s %s %s\n", IndexPrefix, Created, newIndexName)
+	} else {
+		fmt.Printf("%s %s %s\n", IndexPrefix, Updated, newIndexName)
+	}
 
 	if bulkIndexing {
-		settings, err := client.IndexPutSettings(indexWithDate).BodyString(bulkIndexingSettings).Do(context.Background())
+		indexingSettings := `{
+			"index" : {
+				"refresh_interval" : "-1",
+				"number_of_replicas": "0"
+			}
+		}
+		`
+		settings, err := client.IndexPutSettings(newIndexName).BodyString(indexingSettings).Do(context.Background())
 		if err != nil {
-			return "", errors.Wrapf(err, "failed setting refresh_interval to -1 for index %s", indexWithDate)
+			return "", errors.Wrapf(err, "failed setting index refresh_interval/replica settings for index %s", newIndexName)
 		}
 
 		if !settings.Acknowledged {
 			fmt.Println("index settings not acknowledged")
 		}
+		fmt.Printf("%s %s refresh_interval(0)/replica(-1) for %s \n", SettingsPrefix, Updated, newIndexName)
 	}
 
-	if !create.Acknowledged {
-		fmt.Println("index creation not acknowledged")
-	}
-
-	fmt.Printf("%s %s %s\n", IndexTemplatePrefix, Updated, index)
-	fmt.Printf("%s %s %s\n", IndexPrefix, Created, indexWithDate)
-	return indexWithDate, nil
+	return newIndexName, nil
 }
 
 func UpdateTemplatesAndCreateNewIndices(client *elastic.Client, templatesDir string, bulkIndexing bool) (map[string]string, error) {
@@ -97,7 +110,7 @@ func UpdateTemplatesAndCreateNewIndices(client *elastic.Client, templatesDir str
 		}
 
 		filePath := filepath.Join(templatesDir, file.Name())
-		newIndex, err := UpdateTemplateAndCreateNewIndex(client, filePath, bulkIndexing)
+		newIndex, err := UpdateTemplateAndCreateNewIndex(client, filePath, "", bulkIndexing)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed create new index from updated template %s", filePath)
 		}
@@ -109,7 +122,7 @@ func UpdateTemplatesAndCreateNewIndices(client *elastic.Client, templatesDir str
 	return aliasToNewIndex, err
 }
 
-func ReindexOne(client *elastic.Client, alias, newIndex string) error {
+func ReindexOne(client *elastic.Client, alias, newIndex string, versionExternal, noUpdateAlias, bulkIndexing bool) error {
 	// We assume that we are reindexing from an existing index on the alias
 	reindexingRequired := true
 
@@ -131,16 +144,75 @@ func ReindexOne(client *elastic.Client, alias, newIndex string) error {
 		indicesFromAlias := aliasResult.IndicesByAlias(alias)
 		for _, index := range indicesFromAlias {
 			// Reindex from the existing index as the source to the new index as the destination
+			targetVersionType := "internal"
+			if versionExternal {
+				targetVersionType = "external"
+			}
 			src := elastic.NewReindexSource().Index(index)
-			dst := elastic.NewReindexDestination().Index(newIndex)
+			dst := elastic.NewReindexDestination().Index(newIndex).VersionType(targetVersionType)
 			refresh, err := client.Reindex().Source(src).Destination(dst).Refresh("true").Conflicts("proceed").Do(context.Background())
 			if err != nil {
 				return errors.Wrapf(err, "failed reindexing from %s to %s", index, newIndex)
 			}
 
 			fmt.Printf("%s %s %d from %s to %s\n", DocumentsPrefix, Reindexed, refresh.Total, index, newIndex)
+		}
+	}
 
-			// Remove the existing index from the alias
+	// We don't reset the refresh/replca values unless we're either updating the index Alias or bulkIndexing isn't set
+	if !noUpdateAlias || !bulkIndexing {
+		templates, err := client.IndexGetTemplate(alias).Do(context.Background())
+		if err != nil {
+			return errors.Wrapf(err, "failed to retrieve index template %s", alias)
+		}
+
+		seconds := "null"
+		replicas := "null"
+
+		if refreshInterval, ok := templates[alias].Settings["index"].(map[string]interface{})["refresh_interval"]; ok {
+			seconds = fmt.Sprintf(`"%s"`, refreshInterval.(string))
+		}
+		if replicaCount, ok := templates[alias].Settings["index"].(map[string]interface{})["number_of_replicas"]; ok {
+			replicas = fmt.Sprintf(`"%s"`, replicaCount.(string))
+		}
+
+		// Reset the refresh interval to either whatever is specified in the index template or the default (using null)
+		resetRefreshInterval := fmt.Sprintf(`{
+		"index" : {
+			"refresh_interval" : %s,
+			"number_of_replicas" : %s
+		}
+	}
+	`, seconds, replicas)
+
+		settings, err := client.IndexPutSettings(newIndex).BodyString(resetRefreshInterval).Do(context.Background())
+		if err != nil {
+			return errors.Wrapf(err, "failed setting index bulkimport/replica settings for index %s", newIndex)
+		}
+
+		if !settings.Acknowledged {
+			fmt.Println("index settings not acknowledged")
+		}
+		fmt.Printf("%s %s refresh_interval/replica for %s reset to template values\n", SettingsPrefix, Updated, newIndex)
+	}
+
+	if !noUpdateAlias {
+		return UpdateAlias(client, alias, newIndex)
+	}
+	return nil
+}
+
+func UpdateAlias(client *elastic.Client, alias, newIndex string) error {
+	if exists, err := client.IndexExists(newIndex).Do(context.Background()); err != nil || !exists {
+		fmt.Printf("failed checking for index %s", newIndex)
+		return errors.Wrapf(err, "failed checking for index %s", newIndex)
+	}
+
+	aliasResult, err := client.Aliases().Alias(alias).Do(context.Background())
+	if err == nil {
+		// Remove the existing index from the alias
+		indicesFromAlias := aliasResult.IndicesByAlias(alias)
+		for _, index := range indicesFromAlias {
 			removeAlias, err := client.Alias().Remove(index, alias).Do(context.Background())
 			if err != nil {
 				return errors.Wrapf(err, "failed removing index %s from alias %s", index, alias)
@@ -152,34 +224,11 @@ func ReindexOne(client *elastic.Client, alias, newIndex string) error {
 
 			fmt.Printf("%s %s %s from %s\n", AliasPrefix, Removed, index, alias)
 		}
-	}
-
-	templates, err := client.IndexGetTemplate(alias).Do(context.Background())
-	if err != nil {
-		return errors.Wrapf(err, "failed to retrieve index template %s", alias)
-	}
-
-	seconds := "null"
-
-	if refreshInterval, ok := templates[alias].Settings["index"].(map[string]interface{})["refresh_interval"]; ok {
-		seconds = fmt.Sprintf(`"%s"`, refreshInterval.(string))
-	}
-
-	// Reset the refresh interval to either whatever is specified in the index template or the default (using null)
-	resetRefreshInterval := fmt.Sprintf(`{
-    "index" : {
-        "refresh_interval" : %s
-    }
-}
-`, seconds)
-
-	settings, err := client.IndexPutSettings(newIndex).BodyString(resetRefreshInterval).Do(context.Background())
-	if err != nil {
-		return errors.Wrapf(err, "failed setting refresh_interval to -1 for index %s", newIndex)
-	}
-
-	if !settings.Acknowledged {
-		fmt.Println("index settings not acknowledged")
+	} else {
+		if !elastic.IsNotFound(err) {
+			return errors.Wrapf(err, "failed trying to lookup alias %s", alias)
+		}
+		fmt.Printf("%s %s %s not found, must be a new index\n", AliasPrefix, Info, alias)
 	}
 
 	// Add our new index which has been reindex with the existing data to the alias
@@ -197,9 +246,27 @@ func ReindexOne(client *elastic.Client, alias, newIndex string) error {
 	return nil
 }
 
+func UpdateHostAllocation(client *elastic.Client, newIndex, allocation string) error {
+
+	resetAllocation := fmt.Sprintf(`{
+		"index" : {
+			"routing.allocation.require._name" : "%s"
+		}
+	}
+	`, allocation)
+
+	_, err := client.IndexPutSettings(newIndex).BodyString(resetAllocation).Do(context.Background())
+	if err != nil {
+		return errors.Wrapf(err, "failed setting routing allocation to %s for index %s", allocation, newIndex)
+	}
+
+	fmt.Printf("%s %s Allocation set to %s\n", SettingsPrefix, Updated, allocation)
+	return nil
+}
+
 func ReindexAll(client *elastic.Client, aliasToNewIndex map[string]string) error {
 	for alias, newIndex := range aliasToNewIndex {
-		if err := ReindexOne(client, alias, newIndex); err != nil {
+		if err := ReindexOne(client, alias, newIndex, false, false, false); err != nil {
 			return errors.Wrapf(err, "failed reindexing to %s and adding to alias %s", newIndex, alias)
 		}
 	}

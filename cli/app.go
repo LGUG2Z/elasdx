@@ -46,6 +46,7 @@ func App() *cli.App {
 	app.Commands = []cli.Command{
 		Reindex(),
 		Cleanup(),
+		UpdateAlias(),
 	}
 
 	return app
@@ -132,9 +133,14 @@ func Cleanup() cli.Command {
 func Reindex() cli.Command {
 	return cli.Command{
 		Name:  "reindex",
-		Usage: "create a new index from an index template and reindex any existing documents",
+		Usage: "Reindex from a src index to a dest index optionally creating a new index from an index template",
 		Flags: []cli.Flag{
-			cli.BoolFlag{Name: "bulk-indexing", Usage: "set refresh_interval to -1 when reindexing and revert afterwards"},
+			cli.StringFlag{Name: "dest-index", Usage: "Optionally specify destination index, otherwise one will be generated and created for you."},
+			cli.BoolFlag{Name: "bulk-indexing", Usage: "set refresh_interval to -1 and set number_of_replicas to 0 when reindexing and revert afterwards."},
+			cli.BoolFlag{Name: "version-external", Usage: "set version_type to external. This will only index documents if they don't exist or the source doc is at a higher version"},
+			cli.BoolFlag{Name: "no-update-alias", Usage: "don't update the index alias. This setting will also not revert the refresh_interval and number_of_replicas if bulk-indexing is set"},
+			cli.StringFlag{Name: "reindex-host-allocation", Usage: "Optional target host for the reindex to happen on. eg. 'es-reindex-*'"},
+			cli.StringFlag{Name: "dest-host-allocation", Usage: "Optional target host once the reindex is complete. eg. 'es-data-*'"},
 		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() == 0 || c.NArg() > 1 {
@@ -148,19 +154,42 @@ func Reindex() cli.Command {
 			}
 
 			if strings.HasSuffix(c.Args().First(), ".json") {
+				// Single index
 				filePath := c.Args().First()
-				newIndex, err := elasticsearch.UpdateTemplateAndCreateNewIndex(client, filePath, c.Bool("bulk-indexing"))
+
+				newIndex, err := elasticsearch.UpdateTemplateAndCreateNewIndex(client, filePath, c.String("dest-index"), c.Bool("bulk-indexing"))
 				if err != nil {
 					return err
 				}
 
+				if c.IsSet("reindex-host-allocation") {
+					// Update index settings to force allocation to specified host pattern for reindex
+					err := elasticsearch.UpdateHostAllocation(client, newIndex, c.String("reindex-host-allocation"))
+					if err != nil {
+						return err
+					}
+				}
+
 				_, fileName := filepath.Split(filePath)
 				alias := strings.TrimSuffix(fileName, ".json")
-				if err = elasticsearch.ReindexOne(client, alias, newIndex); err != nil {
+				if err = elasticsearch.ReindexOne(client, alias, newIndex, c.Bool("version-external"), c.Bool("no-update-alias"), c.Bool("bulk-indexing")); err != nil {
 					return err
 				}
 
+				if c.IsSet("dest-host-allocation") {
+					// Update index settings to force allocation to specified host pattern after reindex is complete
+					err := elasticsearch.UpdateHostAllocation(client, newIndex, c.String("dest-host-allocation"))
+					if err != nil {
+						return err
+					}
+				}
 				return nil
+			}
+
+			// Multiple indexes
+			if c.IsSet("dest-index") {
+				fmt.Printf("--dest-index not supported with multiple indexes, please only specify one index template .json.")
+				cli.ShowCommandHelpAndExit(c, "reindex", 1)
 			}
 
 			directory := c.Args().First()
@@ -173,6 +202,32 @@ func Reindex() cli.Command {
 				return err
 			}
 
+			return nil
+		},
+	}
+}
+
+func UpdateAlias() cli.Command {
+	return cli.Command{
+		Name:  "update-alias",
+		Usage: "Swap an index alias to another index",
+		Flags: []cli.Flag{
+			cli.StringFlag{Name: "alias", Usage: "Name of the alias."},
+			cli.StringFlag{Name: "dest-index", Usage: "Name of the destination index."},
+		},
+		Action: func(c *cli.Context) error {
+			if !c.IsSet("alias") || !c.IsSet("dest-index") {
+				fmt.Printf("This command requires a json index template file path or a directory of json index templates\n\n")
+				cli.ShowCommandHelpAndExit(c, "reindex", 1)
+			}
+			client, err := getClient(c)
+			if err != nil {
+				return errors.Wrap(err, "error connecting to ElasticSearch")
+			}
+
+			if err = elasticsearch.UpdateAlias(client, c.String("alias"), c.String("dest-index")); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
