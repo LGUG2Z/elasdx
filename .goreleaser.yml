@@ -28,7 +28,7 @@ dockers:
 
 brews:
   - name: elasdx
-    github:
+    tap:
       owner: LGUG2Z
       name: homebrew-tap
     folder: Formula
