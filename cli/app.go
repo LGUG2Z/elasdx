@@ -139,8 +139,10 @@ func Reindex() cli.Command {
 			cli.BoolFlag{Name: "bulk-indexing", Usage: "set refresh_interval to -1 and set number_of_replicas to 0 when reindexing and revert afterwards."},
 			cli.BoolFlag{Name: "version-external", Usage: "set version_type to external. This will only index documents if they don't exist or the source doc is at a higher version"},
 			cli.BoolFlag{Name: "no-update-alias", Usage: "don't update the index alias. This setting will also not revert the refresh_interval and number_of_replicas if bulk-indexing is set"},
+			cli.BoolFlag{Name: "include-type-name", Usage: "passes 'include_type_name=true' for put index template request. Used for ES6->7 upgrade. https://www.elastic.co/blog/moving-from-types-to-typeless-apis-in-elasticsearch-7-0"},
 			cli.StringFlag{Name: "reindex-host-allocation", Usage: "Optional target host for the reindex to happen on. eg. 'es-reindex-*'"},
 			cli.StringFlag{Name: "dest-host-allocation", Usage: "Optional target host once the reindex is complete. eg. 'es-data-*'"},
+			cli.StringFlag{Name: "extra-suffix", Usage: "Optional extra suffix name to add to index name (after date). Ignored if dest-index is set"},
 		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() == 0 || c.NArg() > 1 {
@@ -157,7 +159,7 @@ func Reindex() cli.Command {
 				// Single index
 				filePath := c.Args().First()
 
-				newIndex, err := elasticsearch.UpdateTemplateAndCreateNewIndex(client, filePath, c.String("dest-index"), c.Bool("bulk-indexing"))
+				newIndex, err := elasticsearch.UpdateTemplateAndCreateNewIndex(client, filePath, c.String("dest-index"), c.Bool("bulk-indexing"), c.Bool("include-type-name"), c.String("extra-suffix"))
 				if err != nil {
 					return err
 				}
@@ -193,7 +195,7 @@ func Reindex() cli.Command {
 			}
 
 			directory := c.Args().First()
-			aliasToNewIndex, err := elasticsearch.UpdateTemplatesAndCreateNewIndices(client, directory, c.Bool("bulk-indexing"))
+			aliasToNewIndex, err := elasticsearch.UpdateTemplatesAndCreateNewIndices(client, directory, c.Bool("bulk-indexing"), c.Bool("include-type-name"), c.String("extra-suffix"))
 			if err != nil {
 				return err
 			}

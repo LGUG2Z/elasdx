@@ -27,7 +27,7 @@ var Updated = color.GreenString("Updated    ")
 var Reindexed = color.YellowString("Reindexed  ")
 var Info = color.YellowString("Info       ")
 
-func UpdateTemplateAndCreateNewIndex(client *elastic.Client, filePath, newIndexName string, bulkIndexing bool) (string, error) {
+func UpdateTemplateAndCreateNewIndex(client *elastic.Client, filePath, newIndexName string, bulkIndexing bool, includeTypeName bool, extraSuffix string) (string, error) {
 	bytes, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed reading file %s", filePath)
@@ -39,7 +39,7 @@ func UpdateTemplateAndCreateNewIndex(client *elastic.Client, filePath, newIndexN
 	mapping := string(bytes)
 
 	// Update the template
-	indexPutTemplate, err := client.IndexPutTemplate(index).BodyString(mapping).Do(context.Background())
+	indexPutTemplate, err := client.IndexPutTemplate(index).IncludeTypeName(includeTypeName).BodyString(mapping).Do(context.Background())
 	if err != nil {
 		return "", errors.Wrapf(err, "failed updating index template %s", index)
 	}
@@ -50,8 +50,11 @@ func UpdateTemplateAndCreateNewIndex(client *elastic.Client, filePath, newIndexN
 	fmt.Printf("%s %s %s\n", IndexTemplatePrefix, Updated, index)
 
 	// Create a unique time-stamped index
-	dateSuffix := time.Now().Format("2006-01-02-15:04:05")
+	dateSuffix := strings.ReplaceAll(time.Now().Format("2006-01-02-15:04:05"), ":", "-")
 	if newIndexName == "" {
+		if extraSuffix != "" {
+			dateSuffix = fmt.Sprintf("%s-%s", dateSuffix, extraSuffix)
+		}
 		newIndexName = fmt.Sprintf("%s-%s", index, dateSuffix)
 	}
 
@@ -95,7 +98,7 @@ func UpdateTemplateAndCreateNewIndex(client *elastic.Client, filePath, newIndexN
 	return newIndexName, nil
 }
 
-func UpdateTemplatesAndCreateNewIndices(client *elastic.Client, templatesDir string, bulkIndexing bool) (map[string]string, error) {
+func UpdateTemplatesAndCreateNewIndices(client *elastic.Client, templatesDir string, bulkIndexing bool, includeTypeName bool, extraSuffix string) (map[string]string, error) {
 	files, err := ioutil.ReadDir(templatesDir)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed reading files in directory %s", templatesDir)
@@ -110,7 +113,7 @@ func UpdateTemplatesAndCreateNewIndices(client *elastic.Client, templatesDir str
 		}
 
 		filePath := filepath.Join(templatesDir, file.Name())
-		newIndex, err := UpdateTemplateAndCreateNewIndex(client, filePath, "", bulkIndexing)
+		newIndex, err := UpdateTemplateAndCreateNewIndex(client, filePath, "", bulkIndexing, includeTypeName, extraSuffix)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed create new index from updated template %s", filePath)
 		}
