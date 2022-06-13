@@ -143,6 +143,7 @@ func Reindex() cli.Command {
 			cli.StringFlag{Name: "reindex-host-allocation", Usage: "Optional target host for the reindex to happen on. eg. 'es-reindex-*'"},
 			cli.StringFlag{Name: "dest-host-allocation", Usage: "Optional target host once the reindex is complete. eg. 'es-data-*'"},
 			cli.StringFlag{Name: "extra-suffix", Usage: "Optional extra suffix name to add to index name (after date). Ignored if dest-index is set"},
+			cli.StringFlag{Name: "remote-src", Usage: "Remote ElasticSearch cluster to reindex from. eg. 'http://es-client:9200'"},
 		},
 		Action: func(c *cli.Context) error {
 			if c.NArg() == 0 || c.NArg() > 1 {
@@ -174,7 +175,7 @@ func Reindex() cli.Command {
 
 				_, fileName := filepath.Split(filePath)
 				alias := strings.TrimSuffix(fileName, ".json")
-				if err = elasticsearch.ReindexOne(client, alias, newIndex, c.Bool("version-external"), c.Bool("no-update-alias"), c.Bool("bulk-indexing")); err != nil {
+				if err = elasticsearch.ReindexOne(client, alias, newIndex, c.String("remote-src"), c.Bool("version-external"), c.Bool("no-update-alias"), c.Bool("bulk-indexing")); err != nil {
 					return err
 				}
 
@@ -200,7 +201,7 @@ func Reindex() cli.Command {
 				return err
 			}
 
-			if err = elasticsearch.ReindexAll(client, aliasToNewIndex); err != nil {
+			if err = elasticsearch.ReindexAll(client, aliasToNewIndex, c.String("remote-src")); err != nil {
 				return err
 			}
 
