@@ -159,7 +159,7 @@ func ReindexOne(client *elastic.Client, alias, newIndex, remoteSrc string, versi
 			src := elastic.NewReindexSource().Index(index)
 			if remoteSrc != "" {
 				// A remote cluster
-				remoteReindexSrc := elastic.NewReindexRemoteInfo().Host(remoteSrc)
+				remoteReindexSrc := elastic.NewReindexRemoteInfo().Host(remoteSrc).SocketTimeout("5m")
 				src = elastic.NewReindexSource().Index(index).RemoteInfo(remoteReindexSrc)
 			}
 			dst := elastic.NewReindexDestination().Index(newIndex).VersionType(targetVersionType)
